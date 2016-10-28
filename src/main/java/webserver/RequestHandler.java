@@ -9,11 +9,15 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.nio.file.Files;
+import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import util.Utility;
+import db.DataBase;
+import model.User;
+import util.HttpRequestUtils;
+import util.IOUtils;
 
 public class RequestHandler extends Thread {
     private static final Logger log = LoggerFactory.getLogger(RequestHandler.class);
@@ -32,36 +36,112 @@ public class RequestHandler extends Thread {
             // TODO 사용자 요청에 대한 처리는 이 곳에 구현하면 된다.
         	
         	//사용자로부터 입력값을 받아오기위해..
-        	BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(in));
-        	String line;
-        	String url;
-        	byte[] body;
+        	BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(in, "UTF-8"));
+        	//요청라인
+        	String line = bufferedReader.readLine();
+        	log.debug("request lins : {}", line);
         	
-        	do{
+        	if(line == null)
+        		return;
+        	
+        	String[] tokens = line.split(" ");
+        	
+        	//본문의 길이
+        	int contentLength = 0;
+        	
+        	while(!line.equals(""))
+        	{
         		line = bufferedReader.readLine();
-        		if(line == null) return;
-        		
-        		if((url = Utility.parseURI(line)) != null){
-        			log.debug("요청한 url = " + url);
-        			body = Files.readAllBytes(new File("./webapp" + url).toPath());
-        			break;
-        		}
-        		else{
-        			  body = "Hello World".getBytes();
-        			  break;
-        		}
-        		
-        	}while(!"".equals(line));
+        		log.debug("header : {}", line);
+        		if(line.contains("Content-Length"))
+        			contentLength = getContentLength(line);
+        	}
         	
-            DataOutputStream dos = new DataOutputStream(out);
-            response200Header(dos, body.length);
-            responseBody(dos, body);
+        	//위에서 요청라인을 파싱한 값.
+        	String url = tokens[1];
+        	if(url.equals("/user/create")){
+        		//int index = url.indexOf("?"); //경로와 쿼리스트링을 구분하는 ?의 위치를 찾음
+        		//String queryString = url.substring(index+1);
+        		
+        		String body = IOUtils.readData(bufferedReader, contentLength);
+        		//바디를 파싱함
+        		Map<String, String> params = HttpRequestUtils.parseQueryString(body);
+        		//유저 객체로 저장
+        		User user = new User(params.get("userId"), params.get("password"), params.get("name"), params.get("email"));
+        		log.debug("User : {}", user);
+        		DataBase.addUser(user); //DB에 데이터 저장
+        		
+        		//응답패킷 보냄.
+        		DataOutputStream dos = new DataOutputStream(out);
+        		response302Header(dos, "/index.html");
+        	}
+        	else if(url.equals("/user/login")){ //요청 메시지가 로그인일경우
+        		String body = IOUtils.readData(bufferedReader, contentLength);
+        		//바디를 파싱함
+        		Map<String, String> params = HttpRequestUtils.parseQueryString(body);
+        		User user = DataBase.findUserById(params.get("userId"));
+        		
+        		if(user == null){ //일치하는 유저가 없을 경우
+        			responseResource(out, "/user/login_failed.html");
+        		}
+        		
+        		if(user.getPassword().equals(params.get("password"))){
+        			DataOutputStream dos = new DataOutputStream(out);
+        			response302LoginSuccessHeader(dos, "/index.html");
+        		}else{
+        			responseResource(out, "/user/login_failed.html");
+        		}
+        	}
+        	else{
+        		responseResource(out, url);
+        	}
         } catch (IOException e) {
             log.error(e.getMessage());
         }
     }
     
-    //헤더를 만드는 부분
+    private void response302LoginSuccessHeader(DataOutputStream dos, String url) {
+		// TODO Auto-generated method stub
+    	try{
+			dos.writeBytes("Http/1.1 302 Redirect \r\n");
+			dos.writeBytes("Set-Cookie: logined=true \r\n"); // 로그인 성공 쿠키를 헤더 써넣어 보냄
+			dos.writeBytes("Location: " + url + " \r\n");
+			dos.writeBytes("\r\n");
+		}catch(IOException e){
+			log.error(e.getMessage());
+		}
+		
+	}
+
+	private void responseResource(OutputStream out, String url) throws IOException {
+		// TODO Auto-generated method stub
+    	DataOutputStream dos = new DataOutputStream(out);
+    	byte[] body = Files.readAllBytes(new File("./webapp" + url).toPath());
+    	response200Header(dos, body.length);
+    	responseBody(dos, body);
+		
+	}
+
+	//302 응답 해더
+    private void response302Header(DataOutputStream dos, String url) {
+		// TODO Auto-generated method stub
+		try{
+			dos.writeBytes("Http/1.1 302 Redirect \r\n");
+			dos.writeBytes("Location: " + url + " \r\n");
+			dos.writeBytes("\r\n");
+		}catch(IOException e){
+			log.error(e.getMessage());
+		}
+	}
+
+	//콘텐트의 길이 파싱
+    private int getContentLength(String line) {
+		// TODO Auto-generated method stub
+    	String[] headerTokens = line.split(":");
+		return Integer.parseInt(headerTokens[1].trim());
+	}
+
+	//헤더를 만드는 부분
     private void response200Header(DataOutputStream dos, int lengthOfBodyContent) {
         try {
             dos.writeBytes("HTTP/1.1 200 OK \r\n");
