@@ -9,6 +9,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.nio.file.Files;
+import java.util.Collection;
 import java.util.Map;
 
 import org.slf4j.Logger;
@@ -21,7 +22,6 @@ import util.IOUtils;
 
 public class RequestHandler extends Thread {
     private static final Logger log = LoggerFactory.getLogger(RequestHandler.class);
-
     private Socket connection;
 
     public RequestHandler(Socket connectionSocket) {
@@ -48,18 +48,27 @@ public class RequestHandler extends Thread {
         	
         	//본문의 길이
         	int contentLength = 0;
-        	
+        	boolean logined = false; //로그인 상태인지
+        	//헤더 읽기
         	while(!line.equals(""))
         	{
         		line = bufferedReader.readLine();
         		log.debug("header : {}", line);
         		if(line.contains("Content-Length"))
         			contentLength = getContentLength(line);
+        		else if(line.contains("Cookie"))
+        			logined = isLogin(line);
         	}
         	
         	//위에서 요청라인을 파싱한 값.
         	String url = tokens[1];
-        	if(url.equals("/user/create")){
+        	if(url.endsWith(".css")){
+        		DataOutputStream dos = new DataOutputStream(out);
+        		byte[] body = Files.readAllBytes(new File("./webapp" + url).toPath());
+        		response200CSSHeader(dos, body.length);
+        		responseBody(dos, body);
+        	}
+        	else if(url.equals("/user/create")){
         		//int index = url.indexOf("?"); //경로와 쿼리스트링을 구분하는 ?의 위치를 찾음
         		//String queryString = url.substring(index+1);
         		
@@ -92,6 +101,28 @@ public class RequestHandler extends Thread {
         			responseResource(out, "/user/login_failed.html");
         		}
         	}
+        	else if(url.equals("/user/list")){
+        		if(!logined){
+        			responseResource(out, "/user/login.html");
+        			return;
+        		}
+        		Collection<User> users = DataBase.findAll();
+        		StringBuilder sb = new StringBuilder();
+        		//유저 테이블 생성
+        		sb.append("<table border='1'>");
+        		for(User user : users){
+        			sb.append("<tr>");
+        			sb.append("<td>" + user.getUserId() + "</td>");
+        			sb.append("<td>" + user.getName() + "</td>");
+        			sb.append("<td>" + user.getEmail() + "</td>");
+        			sb.append("</tr>");
+        		}
+        		sb.append("</table>");
+        		byte[] body = sb.toString().getBytes();
+        		DataOutputStream dos = new DataOutputStream(out);
+        		response200Header(dos, body.length);
+        		responseBody(dos, body);
+        	}
         	else{
         		responseResource(out, url);
         	}
@@ -100,7 +131,30 @@ public class RequestHandler extends Thread {
         }
     }
     
-    private void response302LoginSuccessHeader(DataOutputStream dos, String url) {
+    private void response200CSSHeader(DataOutputStream dos, int length) {
+		// TODO Auto-generated method stub
+    	try {
+            dos.writeBytes("HTTP/1.1 200 OK \r\n");
+            dos.writeBytes("Content-Type: text/css\r\n");
+            dos.writeBytes("Content-Length: " + length + "\r\n");
+            dos.writeBytes("\r\n");
+        } catch (IOException e) {
+            log.error(e.getMessage());
+        }
+	}
+
+	private boolean isLogin(String line) {
+		// TODO Auto-generated method stub
+    	String[] headerTokens = line.split(":");
+    	Map<String, String> cookies = HttpRequestUtils.parseCookies(headerTokens[1].trim());
+    	String value = cookies.get("logined");
+    	if(value == null)
+    		return false;
+    	
+		return Boolean.parseBoolean(value);
+	}
+
+	private void response302LoginSuccessHeader(DataOutputStream dos, String url) {
 		// TODO Auto-generated method stub
     	try{
 			dos.writeBytes("Http/1.1 302 Redirect \r\n");
