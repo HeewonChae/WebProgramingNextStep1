@@ -89,4 +89,13 @@ public class HttpRequest {
 	public String getParam(String string){
 		return params.get(string);
 	}
+	
+	public boolean isLogin()
+	{
+		String value = HttpRequestUtils.parseCookies(headers.get("Cookie")).get("logined");
+    	if(value == null)
+    		return false;
+    	
+		return Boolean.parseBoolean(value);
+	}
 }
