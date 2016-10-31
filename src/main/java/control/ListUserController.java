@@ -1,9 +1,11 @@
-package webserver;
+package control;
 
 import java.util.Collection;
 
 import db.DataBase;
 import model.User;
+import webserver.HttpRequest;
+import webserver.HttpResponse;
 
 public class ListUserController extends AbstractController{
 
@@ -14,7 +16,7 @@ public class ListUserController extends AbstractController{
 	
 	@Override
 	protected void doGet(HttpRequest request, HttpResponse response){
-		if(!request.isLogin()){
+		if(request.getSession().getAttribute("user") != null){ // 세션에 유저데이터가 연결 되었는지?(로그인 되었는지)
 			response.sendRedirect("/user/login.html");
 			return;
 		}
